@@ -17,7 +17,7 @@
 # 07/12/2013        created
 #
 
-INCDIR = ~/Documents/bios/src
+INCDIR = ~/Documents/bios/src/
 BINDIR = .
 DEBUG  =
 
@@ -28,7 +28,7 @@ all : bin
 bin : xup.com
 
 xup.com : $(DEPENDENCIES)
-	nasm $(DEBUG) -f bin xup.asm -o $(BINDIR)/xup.com -l $(BINDIR)/xup.lst
+	nasm $(DEBUG) -i $(INCDIR) -f bin xup.asm -o $(BINDIR)/xup.com -l $(BINDIR)/xup.lst
 
 .PHONY : CLEAN
 clean :

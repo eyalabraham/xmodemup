@@ -1,7 +1,3 @@
-page            58,132
-Code_seg        Segment
-assume          cs:code_seg,ds:code_seg,ss:code_seg
-
 ;************************************************************************;
 ;*                                                                      *;
 ;*      Copyright JK microsystems 1998  -  All Rights Reserved          *;
@@ -19,6 +15,9 @@ assume          cs:code_seg,ds:code_seg,ss:code_seg
 ;*                                                                      *;
 ;*      Version Date    Comments                        Progammer       *;
 ;*      ------- ------- ------------------------------- ----------      *;
+;*      3.0     7-12-13 Rewite for NASM building                        *;
+;*                       and adaptation to new-bios                     *;
+;*                       PC/XT hardware environement    Eyal            *;
 ;*      2.0     9-30-98 Major rewrite of v1.1 -                         *;
 ;*                       Runs on both V-25 and 386Ex                    *;
 ;*                       Hooks for Multi I/O board                      *;
@@ -29,7 +28,12 @@ assume          cs:code_seg,ds:code_seg,ss:code_seg
 ;*                       Timeouts fixed                 jds             *;
 ;*                                                                      *;
 ;************************************************************************;
-
+;
+%include        "iodef.asm"            ; io port definitions for new-bios PC/XT
+;
+%idefine offset                        ; allow NASM to ignore the MASM 'offset' directive
+%idefine ptr                           ; allow NASM to ignore the MASM 'ptr' directive
+;
         org     100h
 start:
         mov     ax,cs                   ; point ds at our segment
@@ -57,7 +61,7 @@ name_present:
         mov     di,offset filename      ; point di at start of filename
 skip_space:
         inc     di                      ; skip past first space
-        cmp     [di],byte ptr ' '       ; test for more leading spaces
+        cmp     [di],byte ptr (' ')     ; test for more leading spaces
         je      skip_space              ; if another, increment past it
         mov     dx,di                   ; done, point dx to first char
         mov     ax,3C00h                ; Create File function
@@ -86,7 +90,7 @@ set_timeout:
         mov     cx,30                   ; 30 times through, 1 second per time
 send_c:
         mov     bp,18                   ; set the timer to 18 = 1 second
-        mov     al,'C'                  ; poll the host for a crc packet
+        mov     al,('C')                ; poll the host for a crc packet
         call    put_char
 wait_1_sec:                             ; wait 1 second for reply
         call    get_char
@@ -189,7 +193,7 @@ last_packet:
         mov     ah,3Eh
         int     21h
 
-        cmp     [full],1                ; did we run out of disk space?
+        cmp     [full],byte 1           ; did we run out of disk space?
         je      full_disk               ; yes, go to error message
 
         mov     ax,4C00h                ; no, back to dos prompt
@@ -216,7 +220,7 @@ too_many_errors:
 
 write_buffer:
         push    dx
-        cmp     [full],1                ; disk full?
+        cmp     [full],byte 1           ; disk full?
         je      dont_write              ; yes, skip disk write 
 
         mov     dx,offset packet_buffer ; no, point to data buffer
@@ -325,7 +329,7 @@ crc_loop_2:
 ;       IO_byte = 8  V-25 J4 / console - implemented
 ;       IO_byte = 9  V-25 J6 - future
 ;
-Get_char:
+get_char:
         call    get_status              ; get the status
         jc      got_char2               ; move on if available
         call    tick                    ; update the tick count
@@ -389,7 +393,7 @@ V25_in:                                 ; wait for and return char
 ;
 ;       PC Serial In - wait for data and return it in AL
 ;
-PC_in:                                  ; wait for and return char
+pc_in:                                  ; wait for and return char
         push    dx
         mov     dx,[com_port_base]
         in      al,dx
@@ -418,7 +422,7 @@ V25_status:                             ; set carry if char avail
 ;
 ;       PC Serial Status - set carry if data is available       
 ;
-PC_status:                              ; set carry if char avail
+pc_status:                              ; set carry if char avail
         push    dx
         mov     dx,[com_port_base]
         add     dx,5
@@ -456,7 +460,7 @@ V25_out_wait:
 ;
 ;       PC Serial Send - Send the char in AL and wait until done
 ;
-PC_out:
+pc_out:
         push    dx
         push    ax
         mov     dx,[com_port_base]
@@ -482,7 +486,7 @@ PC_out_wait:
 ;       If the processor is a 386Ex, we set the I/O byte to zero, if a V-25,
 ;       we set it to 8.
 ;
-Serial_init:                    
+serial_init:
         pushf                           ; put the psw on the stack
         pop     ax                      ; pop it into ax
         or      al,00001000b            ; set bit 3
@@ -494,11 +498,11 @@ Serial_init:
         and     al,00001000b            ; clear all but bit 3
         jz      I386                    ; yes, must be 386
 
-        mov     [io_byte],8             ; no, V-25
+        mov     [io_byte],byte 8        ; no, V-25
         ret
 
 I386:
-        mov     [io_byte],0             ; 386 com2
+        mov     [io_byte],byte 0        ; 386 com2
         mov     ax,com2_base            ; use com1
         mov     word ptr [com_port_base],ax     
 
@@ -529,54 +533,54 @@ I386:
 ;
 ;               Data and buffer area
 
-help:           db      'Upload file with X-MODEM Protocol',0Dh,0Ah
-                db      'Usage:  up file...',0Dh,0Ah
-                db      'Version 2.0 for JK microsystems Flashlite V25 and 386Ex'
-                db      0Dh,0Ah,'$'
+help:           db      "Upload file with X-MODEM Protocol",0Dh,0Ah
+                db      "Usage:  up file...",0Dh,0Ah
+                db      "Version 3.0 adapted from JK microsystems Flashlite V25 and 386Ex"
+                db      0Dh,0Ah,"$"
 
-crlf:           db      0Dh,0Ah,'$'
+crlf:           db      0Dh,0Ah,"$"
 
-open_error:     db      'Error opening file',0Dh,0Ah,'$'
+open_error:     db      "Error opening file",0Dh,0Ah,"$"
 
-write_error:    db      'Error writing file',0Dh,0Ah,'$'
+write_error:    db      "Error writing file",0Dh,0Ah,"$"
 
-rx_error:       db      0Dh,0Ah,0Dh,0Ah,'Too many errors - transfer aborted',0Dh,0Ah,'$'
+rx_error:       db      0Dh,0Ah,0Dh,0Ah,"Too many errors - transfer aborted",0Dh,0Ah,"$"
 
-disk_errorm:    db      0Dh,0Ah,0Dh,0Ah,'A disk error occured',0Dh,0Ah,'$'
+disk_errorm:    db      0Dh,0Ah,0Dh,0Ah,"A disk error occured",0Dh,0Ah,"$"
 
-disk_fullm:     db      0Dh,0Ah,0Dh,0Ah,'Disk Full','$'
+disk_fullm:     db      0Dh,0Ah,0Dh,0Ah,"Disk Full","$"
 
-timeout:        db      0Dh,0Ah,0Dh,0Ah,'Timed out waiting for host to send',0Dh,0Ah,'$'
+timeout:        db      0Dh,0Ah,0Dh,0Ah,"Timed out waiting for host to send",0Dh,0Ah,"$"
 
-abort_message:  db      0Dh,0Ah,0Dh,0Ah,'Transfer aborted by user',0Dh,0Ah,'$'
+abort_message:  db      0Dh,0Ah,0Dh,0Ah,"Transfer aborted by user",0Dh,0Ah,"$"
 
-ready:          db      'Ready, start X-modem upload now,',0Dh,0Ah
-                db      ' Press CNTL-C to abort...',0Dh,0Ah,'$'
+ready:          db      "Ready, start X-modem upload now,",0Dh,0Ah
+                db      " Press CNTL-C to abort...",0Dh,0Ah,"$"
 
-full            db      0
-IO_byte         db      0
-last_tick       db      ?
-handle          dw      ?
-com_port_base   dw      ?
+full:           db      0
+io_byte:        db      0
+last_tick:      db      0
+handle:         dw      0
+com_port_base:  dw      0
 
-filename:       db      20h     dup     (20h)   ; buffer for filename
-packet_buffer:  db      80h     dup     (0)     ; buffer for packet
+filename:       times   20h   db   20h  ; buffer for filename
+packet_buffer:  times   80h   db   0    ; buffer for packet
 
-com1_base       equ     word ptr 3F8h
-com2_base       equ     word ptr 2F8h
-com3_base       equ     word ptr 3E8h
-com4_base       equ     word ptr 2E8h
+com1_base:      equ     word ptr 3F8h
+com2_base:      equ     word ptr 2F8h
+com3_base:      equ     word ptr 3E8h
+com4_base:      equ     word ptr 2E8h
 
-soh     equ     byte ptr        01h     ; start of header
-eot     equ     byte ptr        04h     ; end of text
-ack     equ     byte ptr        06h     ; acknowledged
-nak     equ     byte ptr        15h     ; not acknowledged
+soh:    equ     byte ptr        01h     ; start of header
+eot:    equ     byte ptr        04h     ; end of text
+ack:    equ     byte ptr        06h     ; acknowledged
+nak:    equ     byte ptr        15h     ; not acknowledged
 
-timer   equ     word ptr        0006Ch  ; offset of timer tick increment
-stic0   equ     word ptr        0FF6Eh  ; offset tx0 interrupt reg 
-sric0   equ     word ptr        0FF6Dh  ; offset rx0 interrupt reg      
-txb0    equ     word ptr        0FF62h  ; offset tx0 data reg
-rxb0    equ     word ptr        0FF60h  ; offset rx0 data reg
-
-code_seg        ends
-                end     start
+timer:  equ     word ptr        0006Ch  ; offset of timer tick increment
+stic0:  equ     word ptr        0FF6Eh  ; offset tx0 interrupt reg
+sric0:  equ     word ptr        0FF6Dh  ; offset rx0 interrupt reg
+txb0:   equ     word ptr        0FF62h  ; offset tx0 data reg
+rxb0:   equ     word ptr        0FF60h  ; offset rx0 data reg
+;
+;-----  end of source code
+;
