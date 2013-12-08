@@ -15,7 +15,7 @@
 ;*                                                                      *;
 ;*      Version Date    Comments                        Progammer       *;
 ;*      ------- ------- ------------------------------- ----------      *;
-;*      3.0     7-12-13 Rewite for NASM building                        *;
+;*      3.0     7-12-13 Rewrite for NASM compilation                    *;
 ;*                       and adaptation to new-bios                     *;
 ;*                       PC/XT hardware environement    Eyal            *;
 ;*      2.0     9-30-98 Major rewrite of v1.1 -                         *;
@@ -30,11 +30,13 @@
 ;************************************************************************;
 ;
 %include        "iodef.asm"            ; io port definitions for new-bios PC/XT
+%include        "memdef.asm"           ; new-bios memory locations
 ;
 %idefine offset                        ; allow NASM to ignore the MASM 'offset' directive
 %idefine ptr                           ; allow NASM to ignore the MASM 'ptr' directive
 ;
         org     100h
+;
 start:
         mov     ax,cs                   ; point ds at our segment
         mov     ds,ax                   ; 
@@ -74,13 +76,15 @@ skip_space:
         mov     ax,4C00h                ; then terminate
         int     21h
 good_open:
-        mov     [handle],ax             ; save the handle
+        mov     [handle],ax             ; save the file handle
         mov     dx,offset ready         ; tell user we are ready
         mov     ah,9h   
         int     21h                     ; let dos do it
 
-        call    serial_init             ; determine the serial port and 
-clear_uart:                             ; initialize it if necessary
+        call    serial_init             ; determine the serial port and initialize it if necessary
+;@@- from here on, UART interrupts are diabled on my PC/XT, remember to restore them !!
+;
+clear_uart:
         call    get_status              ; clear the serial channel
         jnc     set_timeout             ; of any garbage chars
         call    get_char
@@ -100,15 +104,18 @@ wait_1_sec:                             ; wait 1 second for reply
         mov     dx,offset timeout       ; point to error message
         mov     ah,9h                   ; tell dos
         int     21h                     ; to print it
+        call    pc_xt_restore_int       ; restore UART interrupts on my PC/XT
         mov     ax,4C00h                ; then terminate
         int     21h
 
 check_header:
         cmp     al,3                    ; was it control-c
         jne     get_1st_packet          ; no, continue
+;
         mov     dx,offset abort_message ; point to error message
         mov     ah,9h                   ; tell dos
         int     21h                     ; to print it
+        call    pc_xt_restore_int       ; restore UART interrupts on my PC/XT
         mov     ax,4C00h                ; then terminate
         int     21h
 
@@ -196,6 +203,7 @@ last_packet:
         cmp     [full],byte 1           ; did we run out of disk space?
         je      full_disk               ; yes, go to error message
 
+        call    pc_xt_restore_int       ; restore UART interrupts on my PC/XT
         mov     ax,4C00h                ; no, back to dos prompt
         int     21h     
 
@@ -215,6 +223,7 @@ too_many_errors:
         mov     dx,offset rx_error      ; point to error message
         mov     ah,9h                   ; tell dos
         int     21h                     ; to print it
+        call    pc_xt_restore_int       ; restore UART interrupts on my PC/XT
         mov     ax,4C00h                ; then terminate
         int     21h
 
@@ -247,7 +256,8 @@ full_disk:
         mov     dx,offset disk_fullm    ; tell user disk is full
         mov     ah,9                    ; tell dos
         int     21h                     ; to print it
-        
+
+        call    pc_xt_restore_int       ; restore UART interrupts on my PC/XT
         mov     ax,4C00h                ; and leave
         int     21h
 
@@ -257,6 +267,7 @@ disk_error:
         mov     ah,9                    ; tell dos
         int     21h                     ; to print it
         
+        call    pc_xt_restore_int       ; restore UART interrupts on my PC/XT
         mov     ax,4C00h                ; and leave
         int     21h
 
@@ -310,64 +321,95 @@ crc_loop_2:
         
 ;-----------------------------------------------------------------------------
 ;
-;       Get_char waits for an incoming char while decrementing BP with each
+;       get_char waits for an incoming char while decrementing BP with each
 ;       timer tick.  If BP goes to zero before a char is received, get_char 
 ;       returns with carry clear. If a char is received before BP goes to 
 ;       zero, carry is set and the char is returned in AL.  
 ;
-;       Get_char also dispatches to the proper serial handler based on the 
-;       value of IO_byte.  
+;       get_char also dispatches to the proper serial handler based on the
+;       value of io_byte.
 ;
-;       IO_byte = 0  PC COM1 / console - implemented
-;       IO_byte = 1  PC COM2 - future
-;       IO_byte = 2  PC COM3 - future
-;       IO_byte = 3  PC COM4 - future
-;       IO_byte = 4  Multi I/O UART #1 - future
-;       IO_byte = 5  Multi I/O UART #2 - future
-;       IO_byte = 6  Multi I/O UART #3 - future
-;       IO_byte = 7  Multi I/O UART #4 - future
-;       IO_byte = 8  V-25 J4 / console - implemented
-;       IO_byte = 9  V-25 J6 - future
+;       io_byte = 0  PC COM1 / console - implemented
+;       io_byte = 1  PC COM2 - future
+;       io_byte = 2  PC COM3 - future
+;       io_byte = 3  PC COM4 - future
+;       io_byte = 4  Multi I/O UART #1 - future
+;       io_byte = 5  Multi I/O UART #2 - future
+;       io_byte = 6  Multi I/O UART #3 - future
+;       io_byte = 7  Multi I/O UART #4 - future
+;       io_byte = 8  V-25 J4 / console - implemented
+;       io_byte = 9  V-25 J6 - future
+;       io_byte = aa  PC/XT new-bios hardware system @@- added to support my HW config and BIOS
 ;
 get_char:
         call    get_status              ; get the status
-        jc      got_char2               ; move on if available
+        jc      got_char                ; move on if available
         call    tick                    ; update the tick count
         cmp     bp,0                    ; timed out?
         jne     get_char                ; no, continue to wait for char
         clc                             ; yes, clear carry
         ret                             ; and leave
-
-got_char2:
+;
+got_char:
         call    get_char_dispatch       ; get the char
         stc                             ; set carry
         ret                             ; and return
-
+;
+;-----  get Rx status from UART
+;
 get_status:
-        cmp     [io_byte],byte ptr 0
-        jne     try_v25_status
+        cmp     [io_byte], byte sign    ; check is this is my PC/XT
+        je      .try_pc_xt              ;  yes, get status
+        cmp     [io_byte],byte ptr 0    ;  no, try other systems
+        jne     .try_v25
         call    pc_status
         ret
-try_v25_status:
+.try_pc_xt:                             ; get Rx status from my PC/XT
+        call    pc_xt_status
+        ret
+.try_v25:
         call    V25_status
         ret
-        
+;
+;-----  get charcter from UART
+;
 get_char_dispatch:
-        cmp     [io_byte],byte ptr 0
-        jne     try_v25_char
+        cmp     [io_byte],byte sign     ; is this my PC/XT?
+        je      .try_pc_xt              ;  yes, get character
+        cmp     [io_byte],byte ptr 0    ;  no, try other systems
+        jne     .try_v25
         call    pc_in
         ret
-try_v25_char:
+.try_pc_xt:
+        call    pc_xt_in
+        ret
+.try_v25:
         call    V25_in
         ret
 
 put_char:
-        cmp     [io_byte],byte ptr 0
-        jne     try_v25_put
+        cmp     [io_byte], byte sign    ; is this my PC/XT?
+        je      .try_pc_xt              ;  yes, put character
+        cmp     [io_byte],byte ptr 0    ;  no, try other systems
+        jne     .try_v25
         call    pc_out
         ret
-try_v25_put:
+.try_pc_xt:
+        call    pc_xt_out
+        ret
+.try_v25:
         call    V25_out
+        ret
+
+;-----------------------------------------------------------------------------
+;
+;       mt PC/XT Serial In - wait for data and return it in AL
+;
+pc_xt_in:
+        push    dx
+        mov     dx,RBR
+        in      al,dx
+        pop     dx
         ret
 
 ;-----------------------------------------------------------------------------
@@ -402,6 +444,20 @@ pc_in:                                  ; wait for and return char
         
 ;-----------------------------------------------------------------------------
 ;
+;       my PC/XT Serial Status - set carry if data is available
+;
+pc_xt_status:                           ; set carry if char avail
+        push    ax
+        push    dx
+        mov     dx,LSR
+        in      al,dx                   ; get UART line status
+        sar     al,1                    ; shift Rx status into CT.f
+        pop     dx
+        pop     ax
+        ret                             ; and leave
+
+;-----------------------------------------------------------------------------
+;
 ;       V25 Serial Status - set carry if data is available      
 ;
 V25_status:                             ; set carry if char avail
@@ -429,6 +485,26 @@ pc_status:                              ; set carry if char avail
         in      al,dx
         rcr     al,1
         pop     dx
+        ret
+
+;-----------------------------------------------------------------------------
+;
+;       my PC/XT Serial Send - Send the char in AL and wait until done
+;
+pc_xt_out:
+        push        ax
+        push        dx
+        mov         dx,LSR
+        mov         ah,al               ; save AL
+pc_xt_wait_out:
+        in          al,dx               ; read LSR
+        and         al,00100000b        ; check if transmit hold reg is empty
+        jz          pc_xt_wait_out      ; loop if not empty
+        mov         dx,THR
+        mov         al,ah               ; restore AL
+        out         dx,al               ; output to serial console
+        pop         dx
+        pop         ax
         ret
 
 ;-----------------------------------------------------------------------------
@@ -487,6 +563,27 @@ PC_out_wait:
 ;       we set it to 8.
 ;
 serial_init:
+;@@- determine if running on a new-bios system by reading year from date signiture of ROM
+        push    ds
+        mov     ax,ROMSEG
+        mov     ds,ax
+        mov     ax,[ds:(RELDATE+6)]     ; get date's year-digits
+        pop     ds
+        cmp     ax,3331h                ; are the 'newbios' characters '13' present in the release year?
+        jne     not_new_bios            ; continue if not 'newbios'
+        mov     [io_byte],byte sign     ; set signiture
+;
+;-----  setup UART
+;
+        mov     dx,IER
+        mov     al,0
+        out     dx,al                   ; disable UART's Rx interrupt generation
+;
+;-----  exit serial_init
+;
+        jmp     done
+
+not_new_bios:
         pushf                           ; put the psw on the stack
         pop     ax                      ; pop it into ax
         or      al,00001000b            ; set bit 3
@@ -506,39 +603,64 @@ I386:
         mov     ax,com2_base            ; use com1
         mov     word ptr [com_port_base],ax     
 
-        ret                             ; comment out to run on PC
+done:
+        call    print_system            ; print system type
+        ret
 
-;       The following debug code is useful when running UP on a PC 
-;       and the serial port is not initialized.
+;-----------------------------------------------------------------------------
+;
+;       if running on my PC/XT then use this routine to restore
+;       UART intterupts that were disabled in 'serial_init'
+;
+pc_xt_restore_int:
+        cmp     [io_byte],byte sign    ; is this my PC/XT?
+        jne     no_int_restore          ;  no, nothing to do here
+        mov     dx,IER
+        mov     al,INTRINIT
+        out     dx,al                   ; enable UART's Rx interrupt generation
+no_int_restore:
+        ret
 
-        mov     dx,ax                   ; set 9600 baud
+;-----------------------------------------------------------------------------
+;
+;       print out system type for user verification
+;       call this routine only after 'serial_init'
+;
+print_system:
+        push    ax
         push    dx
-        add     dx,3
-        mov     al,83h                  ; set bit to change baud rate reg
-        out     dx,al                   
-        sub     dx,3                    ; low byte of divisor           
-        mov     al,12                   ; divisor for 9600 baud
-        out     dx,al                   ; send it
-        add     dx,3                    ; restore line control reg
-        mov     al,3
-        out     dx,al
-
-        pop     dx                      ; enable dtr,rts,out2
-        add     dx,4                    
-        mov     ax,0Bh                  
-        out     dx,al
+        cmp     [io_byte],byte sign    ; is this my PC/XT?
+        jne     .try_v25
+        mov     dx,note_my_pc_xt
+        jmp     .print_note
+.try_v25:
+        cmp     [io_byte],byte 8       ; is this a v25?
+        jne     .try_386
+        mov     dx,note_v25
+        jmp     .print_note
+.try_386:
+        mov     dx,note_386
+;
+.print_note:
+        mov     ah,9h
+        int     21h
+        pop     dx
+        pop     ax
         ret
 
 ;-----------------------------------------------------------------------------
 ;
 ;               Data and buffer area
-
+;
 help:           db      "Upload file with X-MODEM Protocol",0Dh,0Ah
-                db      "Usage:  up file...",0Dh,0Ah
-                db      "Version 3.0 adapted from JK microsystems Flashlite V25 and 386Ex"
-                db      0Dh,0Ah,"$"
-
+                db      "Usage:  xup <file_name>",0Dh,0Ah
+                db      "Version 3.0 adapted from JK microsystems Flashlite V25 and 386Ex",0Dh,0Ah
+                db      "Build: ", __DATE__, " ", __TIME__
 crlf:           db      0Dh,0Ah,"$"
+
+note_my_pc_xt:  db      "system: PC/XT",0Dh,0Ah,"$"
+note_v25:       db      "system: V25",0Dh,0Ah,"$"
+note_386:       db      "system: i386",0Dh,0Ah,"$"
 
 open_error:     db      "Error opening file",0Dh,0Ah,"$"
 
@@ -554,8 +676,7 @@ timeout:        db      0Dh,0Ah,0Dh,0Ah,"Timed out waiting for host to send",0Dh
 
 abort_message:  db      0Dh,0Ah,0Dh,0Ah,"Transfer aborted by user",0Dh,0Ah,"$"
 
-ready:          db      "Ready, start X-modem upload now,",0Dh,0Ah
-                db      " Press CNTL-C to abort...",0Dh,0Ah,"$"
+ready:          db      "Ready, start X-modem upload (CNTL-C to abort)...",0Dh,0Ah,"$"
 
 full:           db      0
 io_byte:        db      0
@@ -581,6 +702,8 @@ stic0:  equ     word ptr        0FF6Eh  ; offset tx0 interrupt reg
 sric0:  equ     word ptr        0FF6Dh  ; offset rx0 interrupt reg
 txb0:   equ     word ptr        0FF62h  ; offset tx0 data reg
 rxb0:   equ     word ptr        0FF60h  ; offset rx0 data reg
+
+sign:   equ     0aah                    ; 'newbios' signiture for serial io handling
 ;
 ;-----  end of source code
 ;

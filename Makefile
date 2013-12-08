@@ -28,7 +28,7 @@ all : bin
 bin : xup.com
 
 xup.com : $(DEPENDENCIES)
-	nasm $(DEBUG) -i $(INCDIR) -f bin xup.asm -o $(BINDIR)/xup.com -l $(BINDIR)/xup.lst
+	nasm $(DEBUG) -i $(INCDIR) -fbin xup.asm -o $(BINDIR)/xup.com -l $(BINDIR)/xup.lst
 
 .PHONY : CLEAN
 clean :
