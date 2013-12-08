@@ -1,8 +1,8 @@
 
  xup.asm
  
- A program to provide xmodel upload functionality
- The program can onlt be used on a hacked PC/XT for project new-bios
+ A program to provide xmodem upload functionality
+ The program can only be used on a hacked PC/XT for project new-bios
  The program is based on source by JK Microsystems
  
  new-bios mods      version 3.0 07-12-2013
@@ -10,4 +10,4 @@
  
  Usage:
  
- 
+    xup <file_name>
