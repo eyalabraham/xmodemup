@@ -569,7 +569,7 @@ serial_init:
         mov     ds,ax
         mov     ax,[ds:(RELDATE+6)]     ; get date's year-digits
         pop     ds
-        cmp     ax,3331h                ; are the 'newbios' characters '13' present in the release year?
+        cmp     ax,3431h                ; are the 'newbios' characters '14' present in the release year?
         jne     not_new_bios            ; continue if not 'newbios'
         mov     [io_byte],byte sign     ; set signiture
 ;
